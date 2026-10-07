@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMINISTRADOR
+  ADMINISTRATIVO
+  LECTURA
+}
+
+enum LoadStatus {
+  PENDIENTE
+  REALIZADA
+  PARCIAL
+  INCIDENCIA
+  PENDIENTE_CALIDAD
+  FALTA_STOCK
+  ANULADA
+}
+
+enum MovementType {
+  CARGA_OF
+  TRASIEGO
+  MOVIMIENTO_STOCK
+  DEVOLUCION
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  STATUS_CHANGE
+  VOID
+  DELETE
+  LOGIN
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  surnames     String?
+  username     String     @unique
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(LECTURA)
+  active       Boolean    @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  createdLoads Carga[]    @relation("CargaCreatedBy")
+  updatedLoads Carga[]    @relation("CargaUpdatedBy")
+  deletedLoads Carga[]    @relation("CargaDeletedBy")
+  voidedLoads  Carga[]    @relation("CargaVoidedBy")
+  auditLogs    AuditLog[]
+}
+
+model Carga {
+  id                  String       @id @default(cuid())
+  fecha               DateTime
+  tipoMovimiento      MovementType @default(CARGA_OF)
+  nbiEntrega          String?
+  nbiRecepcion        String?
+  codigoArticulo      String
+  descripcionArticulo String
+  lote                String?
+  cantidadPrevista    Decimal      @db.Decimal(12, 3)
+  cantidadRealizada   Decimal      @default(0) @db.Decimal(12, 3)
+  ubicacionOrigen     String?
+  ubicacionDestino    String?
+  ordenFabricacion    String?
+  comentario          String?
+  estado              LoadStatus   @default(PENDIENTE)
+  voidReason          String?
+  voidedAt            DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  createdById         String
+  updatedById         String?
+  deletedById         String?
+  voidedById          String?
+
+  createdBy           User         @relation("CargaCreatedBy", fields: [createdById], references: [id])
+  updatedBy           User?        @relation("CargaUpdatedBy", fields: [updatedById], references: [id])
+  deletedBy           User?        @relation("CargaDeletedBy", fields: [deletedById], references: [id])
+  voidedBy            User?        @relation("CargaVoidedBy", fields: [voidedById], references: [id])
+
+  @@index([codigoArticulo])
+  @@index([ordenFabricacion])
+  @@index([lote])
+  @@index([estado])
+  @@index([fecha])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  userId    String?
+  entity    String
+  entityId  String
+  action    AuditAction
+  oldData   Json?
+  newData   Json?
+  createdAt DateTime    @default(now())
+
+  user      User?       @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+model AppSetting {
+  id                         String   @id @default("global")
+  appName                    String   @default("Almacén General")
+  warehouseName              String   @default("Fábrica de Municiones de Granada")
+  itemsPerPage               Int      @default(25)
+  confirmBeforeVoid          Boolean  @default(true)
+  updatedAt                  DateTime @updatedAt
+}
