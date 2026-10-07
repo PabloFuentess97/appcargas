@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { ChangeEvent, ClipboardEvent, KeyboardEvent, useRef, useState } from "react";
 import { MovementType } from "@prisma/client";
+import { AlertTriangle, Check, ClipboardCheck, Copy, Info, Plus, Save, Trash2, Upload } from "lucide-react";
 import { movementLabels } from "@/lib/format";
 
 type Row = {
@@ -136,14 +137,21 @@ export function NuevaCargaClient() {
     router.refresh();
   }
 
+  const filledRows = rows.filter((row) => row.codigoArticulo.trim() || row.descripcionArticulo.trim() || row.cantidadPrevista.trim());
+  const validRows = filledRows.filter((row) => row.codigoArticulo.trim() && row.descripcionArticulo.trim() && Number(row.cantidadPrevista) > 0);
+  const warningRows = filledRows.filter((row) => !row.ubicacionOrigen.trim() || !(row.ubicacionDestino.trim() || common.ubicacionDestino.trim()));
+  const errorRows = filledRows.length - validRows.length;
+  const totalQuantity = filledRows.reduce((sum, row) => sum + (Number(row.cantidadPrevista) || 0), 0);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black text-slate-950">Nueva carga</h1>
-          <p className="mt-1 text-sm text-slate-600">Entrada rápida de líneas con comportamiento similar a Excel</p>
+          <h1 className="text-2xl font-black text-[#0b1b33]">Nueva carga</h1>
+          <p className="mt-1 text-sm font-semibold text-[#6b8299]">Entrada rápida de datos tipo Excel para cargas por realizar</p>
         </div>
         <button className="btn btn-primary" disabled={saving} onClick={save} type="button">
+          <Save className="h-4 w-4" />
           {saving ? "Guardando..." : "Guardar cargas"}
         </button>
       </div>
@@ -151,9 +159,11 @@ export function NuevaCargaClient() {
       {message ? <div className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800">{message}</div> : null}
       {error ? <div className="border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-800">{error}</div> : null}
 
-      <section className="border border-slate-200 bg-white p-4">
-        <h2 className="font-black">Datos comunes</h2>
-        <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <section className="app-card p-4">
+        <div className="grid gap-4 xl:grid-cols-[1fr_260px]">
+          <div>
+        <h2 className="font-black text-[#0b1b33]">Datos comunes</h2>
+        <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
           <label className="block">
             <span className="text-xs font-bold uppercase text-slate-500">Fecha</span>
             <input className="field mt-1" type="date" value={common.fecha} onChange={(e) => setCommon({ ...common, fecha: e.target.value })} />
@@ -181,28 +191,39 @@ export function NuevaCargaClient() {
             <input className="field mt-1" value={common.ordenFabricacion} onChange={(e) => setCommon({ ...common, ordenFabricacion: e.target.value })} />
           </label>
         </div>
+          </div>
+          <div className="rounded-md bg-[#eaf4ff] p-4 text-sm text-[#17324d]">
+            <div className="flex items-center gap-2 font-black">
+              <Info className="h-5 w-5 text-[#1f73e8]" />
+              Información
+            </div>
+            <p className="mt-3 font-semibold leading-relaxed text-[#45627f]">Estos datos se aplicarán por defecto a todas las líneas. Puedes modificarlos individualmente en cada fila si es necesario.</p>
+          </div>
+        </div>
       </section>
 
-      <section className="border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-          <h2 className="font-black">Tabla editable</h2>
+      <section className="app-card">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#d7e2ee] px-4 py-3">
+          <h2 className="font-black text-[#0b1b33]">Líneas de carga</h2>
           <div className="flex gap-2">
-            <button className="btn btn-secondary" onClick={addRow} type="button">Añadir fila</button>
+            <button className="btn btn-primary" onClick={addRow} type="button"><Plus className="h-4 w-4" /> Añadir fila</button>
+            <button className="btn btn-secondary" type="button"><Upload className="h-4 w-4" /> Importar desde Excel</button>
             <button className="btn btn-secondary" onClick={() => setRows([emptyRow(), emptyRow(), emptyRow(), emptyRow(), emptyRow()])} type="button">Limpiar</button>
           </div>
         </div>
         <div className="table-scroll overflow-x-auto">
-          <table className="min-w-[1320px] w-full text-sm">
-            <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+          <table className="app-table min-w-[1320px]">
+            <thead>
               <tr>
                 <th className="w-12 px-2 py-2">#</th>
                 {columns.map((column) => <th key={column.key} className={`${column.width} px-2 py-2 font-black`}>{column.label}</th>)}
-                <th className="w-48 px-2 py-2 font-black">Acciones</th>
+                <th className="w-28 px-2 py-2 font-black">Validación</th>
+                <th className="w-36 px-2 py-2 font-black">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="hover:bg-slate-50">
+                <tr key={rowIndex}>
                   <td className="px-2 py-1 text-xs font-bold text-slate-500">{rowIndex + 1}</td>
                   {columns.map((column, colIndex) => (
                     <td key={column.key} className="px-2 py-1">
@@ -216,9 +237,16 @@ export function NuevaCargaClient() {
                       />
                     </td>
                   ))}
-                  <td className="space-x-2 px-2 py-1">
-                    <button className="btn btn-secondary px-2 py-1" onClick={() => duplicateRow(rowIndex)} type="button">Duplicar</button>
-                    <button className="btn btn-secondary px-2 py-1" onClick={() => deleteRow(rowIndex)} type="button">Eliminar</button>
+                  <td className="px-2 py-1">
+                    {row.codigoArticulo || row.descripcionArticulo || row.cantidadPrevista ? (
+                      row.codigoArticulo && row.descripcionArticulo && Number(row.cantidadPrevista) > 0
+                        ? <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800"><Check className="h-3 w-3" /> OK</span>
+                        : <span className="inline-flex items-center gap-1 rounded-md bg-red-100 px-2 py-1 text-xs font-bold text-red-800"><AlertTriangle className="h-3 w-3" /> Revisar</span>
+                    ) : <span className="text-xs text-slate-400">-</span>}
+                  </td>
+                  <td className="space-x-1 px-2 py-1">
+                    <button className="btn btn-secondary px-2 py-1" onClick={() => duplicateRow(rowIndex)} type="button" title="Duplicar línea"><Copy className="h-4 w-4" /></button>
+                    <button className="btn btn-secondary px-2 py-1" onClick={() => deleteRow(rowIndex)} type="button" title="Eliminar línea"><Trash2 className="h-4 w-4" /></button>
                   </td>
                 </tr>
               ))}
@@ -226,6 +254,59 @@ export function NuevaCargaClient() {
           </table>
         </div>
       </section>
+
+      <section className="grid gap-3 xl:grid-cols-3">
+        <div className="app-card bg-emerald-50 p-4">
+          <div className="flex items-center gap-3">
+            <ClipboardCheck className="h-8 w-8 text-emerald-700" />
+            <div>
+              <h2 className="font-black text-[#0b1b33]">Vista previa</h2>
+              <p className="text-sm font-semibold text-[#45627f]">Así se registrará la carga en el sistema</p>
+            </div>
+          </div>
+          <dl className="mt-4 space-y-2 text-sm">
+            <Preview label="Fecha" value={common.fecha} />
+            <Preview label="Tipo de movimiento" value={movementLabels[common.tipoMovimiento as MovementType]} />
+            <Preview label="NBI entrega" value={common.nbiEntrega || "-"} />
+            <Preview label="Destino principal" value={common.ubicacionDestino || "-"} />
+            <Preview label="OF principal" value={common.ordenFabricacion || "-"} />
+          </dl>
+        </div>
+        <div className="app-card p-4">
+          <div className="flex items-center gap-3">
+            <Check className="h-8 w-8 text-[#1f73e8]" />
+            <div>
+              <h2 className="font-black text-[#0b1b33]">Validación previa</h2>
+              <p className="text-sm font-semibold text-[#45627f]">Comprobación de campos obligatorios</p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-3 text-sm font-bold">
+            <p className="text-emerald-700">{validRows.length} líneas correctas</p>
+            <p className="text-amber-700">{warningRows.length} líneas con advertencias</p>
+            <p className="text-red-700">{errorRows} líneas con errores</p>
+          </div>
+        </div>
+        <div className="app-card p-4">
+          <h2 className="font-black text-[#0b1b33]">Resumen de la carga</h2>
+          <dl className="mt-4 space-y-2 text-sm">
+            <Preview label="Total de líneas" value={String(filledRows.length)} />
+            <Preview label="Líneas correctas" value={String(validRows.length)} />
+            <Preview label="Líneas con advertencias" value={String(warningRows.length)} />
+            <Preview label="Líneas con errores" value={String(errorRows)} />
+            <Preview label="Cantidad total" value={new Intl.NumberFormat("es-ES").format(totalQuantity)} />
+          </dl>
+          {errorRows > 0 ? <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Revisa las incidencias antes de guardar.</div> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Preview({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3 border-b border-[#d7e2ee] pb-2">
+      <dt className="font-bold text-[#6b8299]">{label}</dt>
+      <dd className="text-right font-semibold text-[#17324d]">{value}</dd>
     </div>
   );
 }

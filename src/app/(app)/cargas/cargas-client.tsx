@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Download, FileSpreadsheet, Plus, Search, X } from "lucide-react";
 import { LoadStatus, MovementType } from "@prisma/client";
 import { formatDate, formatNumber, movementLabels, statusLabels } from "@/lib/format";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -47,6 +48,7 @@ export function CargasClient({ canWrite, canDelete }: { canWrite: boolean; canDe
   const [sort, setSort] = useState("fecha");
   const [dir, setDir] = useState("desc");
   const [toast, setToast] = useState("");
+  const [selected, setSelected] = useState<CargaRow | null>(null);
 
   useEffect(() => {
     const id = window.setTimeout(() => setDebouncedQ(q), 250);
@@ -65,7 +67,9 @@ export function CargasClient({ canWrite, canDelete }: { canWrite: boolean; canDe
   const load = useCallback(async () => {
     setLoading(true);
     const res = await fetch(`/api/cargas?${params.toString()}`);
-    setData(await res.json());
+    const body = await res.json();
+    setData(body);
+    setSelected((current) => current ?? body.data?.[0] ?? null);
     setLoading(false);
   }, [params]);
 
@@ -149,21 +153,24 @@ export function CargasClient({ canWrite, canDelete }: { canWrite: boolean; canDe
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black text-slate-950">Cargas</h1>
-          <p className="mt-1 text-sm text-slate-600">Gestión y seguimiento de cargas de materiales</p>
+          <h1 className="text-2xl font-black text-[#0b1b33]">Cargas y Seguimiento</h1>
+          <p className="mt-1 text-sm font-semibold text-[#6b8299]">Listado principal de movimientos y control operativo</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canWrite ? <Link className="btn btn-primary" href="/cargas/nueva">Nueva carga</Link> : null}
-          <a className="btn btn-secondary" href={`/api/cargas/export?${params.toString()}`}>Exportar Excel</a>
-          <button className="btn btn-secondary opacity-60" disabled type="button">Importar Excel · Próximamente</button>
+          {canWrite ? <Link className="btn btn-primary" href="/cargas/nueva"><Plus className="h-4 w-4" /> Nueva carga</Link> : null}
+          <a className="btn btn-secondary" href={`/api/cargas/export?${params.toString()}`}><Download className="h-4 w-4" /> Exportar</a>
+          <button className="btn btn-secondary opacity-60" disabled type="button"><FileSpreadsheet className="h-4 w-4" /> Importar Excel</button>
         </div>
       </div>
 
       {toast ? <div className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800">{toast}</div> : null}
 
-      <section className="border border-slate-200 bg-white p-3">
-        <div className="grid gap-3 lg:grid-cols-[1.4fr_repeat(4,1fr)_auto]">
-          <input className="field" placeholder="Buscar artículo, descripción, lote, OF, NBI, ubicación o comentario" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+      <section className="app-card p-3">
+        <div className="grid gap-3 lg:grid-cols-[1.6fr_repeat(4,1fr)_auto]">
+          <label className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7188a0]" />
+            <input className="field pl-9" placeholder="Buscar por artículo, lote, OF, NBI, origen o destino..." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+          </label>
           <select className="field" value={estado} onChange={(e) => { setEstado(e.target.value); setPage(1); }}>
             <option value="">Todos los estados</option>
             {Object.values(LoadStatus).map((item) => <option key={item} value={item}>{statusLabels[item]}</option>)}
@@ -181,12 +188,26 @@ export function CargasClient({ canWrite, canDelete }: { canWrite: boolean; canDe
           </select>
           <button className="btn btn-secondary" type="button" onClick={clearFilters}>Limpiar filtros</button>
         </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {[
+            ["", "Todos", data?.meta.total ?? 0, "bg-blue-50 text-blue-800 border-blue-200"],
+            ["PENDIENTE", "Pendientes", pendientesCount(data?.data, "PENDIENTE"), "bg-amber-50 text-amber-800 border-amber-200"],
+            ["REALIZADA", "Realizadas", pendientesCount(data?.data, "REALIZADA"), "bg-emerald-50 text-emerald-800 border-emerald-200"],
+            ["INCIDENCIA", "Incidencias", pendientesCount(data?.data, "INCIDENCIA"), "bg-red-50 text-red-800 border-red-200"],
+            ["PARCIAL", "Parciales", pendientesCount(data?.data, "PARCIAL"), "bg-sky-50 text-sky-800 border-sky-200"],
+          ].map(([value, label, count, className]) => (
+            <button key={String(label)} className={`rounded-md border px-3 py-2 text-sm font-bold ${className}`} onClick={() => { setEstado(String(value)); setPage(1); }} type="button">
+              {String(label)} ({String(count)})
+            </button>
+          ))}
+        </div>
       </section>
 
-      <section className="border border-slate-200 bg-white">
+      <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_310px]">
+        <div className="app-card min-w-0">
         <div className="table-scroll overflow-x-auto">
-          <table className="min-w-[1680px] w-full text-sm">
-            <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+          <table className="app-table min-w-[1500px]">
+            <thead>
               <tr>
                 {[
                   ["estado", "Estado"],
@@ -207,7 +228,7 @@ export function CargasClient({ canWrite, canDelete }: { canWrite: boolean; canDe
                   ["usuario", "Usuario"],
                   ["acciones", "Acciones"],
                 ].map(([key, label]) => (
-                  <th key={key} className="px-3 py-2 font-black">
+                  <th key={key} className="px-3 py-2">
                     <button
                       className="font-black"
                       disabled={!["fecha", "codigoArticulo", "ordenFabricacion", "estado", "cantidadPrevista"].includes(key)}
@@ -223,11 +244,11 @@ export function CargasClient({ canWrite, canDelete }: { canWrite: boolean; canDe
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {loading ? (
                 <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={17}>Cargando cargas...</td></tr>
               ) : data?.data.length ? data.data.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50">
+                <tr key={row.id} className={selected?.id === row.id ? "bg-blue-50" : ""} onClick={() => setSelected(row)}>
                   <td className="px-3 py-2"><StatusBadge status={row.estado} /></td>
                   <td className="px-3 py-2">{formatDate(row.fecha)}</td>
                   <td className="px-3 py-2">{movementLabels[row.tipoMovimiento]}</td>
@@ -282,7 +303,52 @@ export function CargasClient({ canWrite, canDelete }: { canWrite: boolean; canDe
             <button className="btn btn-secondary" disabled={!data || page >= data.meta.pages} onClick={() => setPage((p) => p + 1)} type="button">Siguiente</button>
           </div>
         </div>
+        </div>
+        <aside className="app-card hidden p-4 xl:block">
+          <div className="flex items-center justify-between border-b border-[#d7e2ee] pb-3">
+            <h2 className="font-black text-[#0b1b33]">Resumen de la selección</h2>
+            <button className="text-[#7188a0]" onClick={() => setSelected(null)} type="button"><X className="h-4 w-4" /></button>
+          </div>
+          {selected ? (
+            <div className="mt-4 space-y-4 text-sm">
+              <StatusBadge status={selected.estado} />
+              <div>
+                <p className="font-black text-[#0b1b33]">{selected.codigoArticulo}</p>
+                <p className="text-xs font-semibold text-[#6b8299]">{selected.descripcionArticulo}</p>
+              </div>
+              <dl className="space-y-2">
+                <SideRow label="Lote" value={selected.lote || "-"} />
+                <SideRow label="OF" value={selected.ordenFabricacion || "-"} />
+                <SideRow label="NBI entrega" value={selected.nbiEntrega || "-"} />
+                <SideRow label="Origen" value={selected.ubicacionOrigen || "-"} />
+                <SideRow label="Destino" value={selected.ubicacionDestino || "-"} />
+                <SideRow label="Cant. prevista" value={formatNumber(selected.cantidadPrevista)} />
+                <SideRow label="Cant. real" value={formatNumber(selected.cantidadRealizada)} />
+                <SideRow label="Pendiente" value={formatNumber(selected.pendiente)} />
+                <SideRow label="Comentario" value={selected.comentario || "-"} />
+              </dl>
+              <div className="space-y-2 pt-2">
+                <button className="btn btn-secondary w-full" onClick={() => router.push(`/cargas/${selected.id}`)} type="button">Abrir detalle</button>
+                {canWrite ? <button className="btn btn-primary w-full" onClick={() => quickPatch(selected.id, { estado: "REALIZADA", cantidadRealizada: selected.cantidadPrevista }, "Carga marcada como realizada.")} type="button">Marcar realizada</button> : null}
+                {canWrite ? <button className="btn btn-secondary w-full" onClick={() => duplicate(selected)} type="button">Duplicar línea</button> : null}
+              </div>
+            </div>
+          ) : <p className="mt-4 text-sm text-[#6b8299]">Selecciona una carga para ver su resumen.</p>}
+        </aside>
       </section>
+    </div>
+  );
+}
+
+function pendientesCount(rows: CargaRow[] | undefined, status: LoadStatus) {
+  return rows?.filter((row) => row.estado === status).length ?? 0;
+}
+
+function SideRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3 border-b border-[#edf3f9] pb-2">
+      <dt className="font-bold text-[#6b8299]">{label}</dt>
+      <dd className="text-right font-semibold text-[#17324d]">{value}</dd>
     </div>
   );
 }
