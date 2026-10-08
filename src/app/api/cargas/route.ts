@@ -138,29 +138,25 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const created = [];
-      for (const row of parsed.data.rows) {
-        const carga = await tx.carga.create({
-          data: {
-            ...parsed.data.common,
-            ...row,
-            ubicacionDestino: row.ubicacionDestino || parsed.data.common.ubicacionDestino,
-            ordenFabricacion: row.ordenFabricacion || parsed.data.common.ordenFabricacion,
-            estado: "PENDIENTE",
-            createdById: auth.session.user.id,
-          },
-        });
-        await tx.auditLog.create({
-          data: {
-            userId: auth.session.user.id,
-            entity: "Carga",
-            entityId: carga.id,
-            action: "CREATE",
-            newData: auditSafeCarga(carga),
-          },
-        });
-        created.push(carga);
-      }
+      const created = await tx.carga.createManyAndReturn({
+        data: parsed.data.rows.map((row) => ({
+          ...parsed.data.common,
+          ...row,
+          ubicacionDestino: row.ubicacionDestino || parsed.data.common.ubicacionDestino,
+          ordenFabricacion: row.ordenFabricacion || parsed.data.common.ordenFabricacion,
+          estado: "PENDIENTE",
+          createdById: auth.session.user.id,
+        })),
+      });
+      await tx.auditLog.createMany({
+        data: created.map((carga) => ({
+          userId: auth.session.user.id,
+          entity: "Carga",
+          entityId: carga.id,
+          action: "CREATE",
+          newData: auditSafeCarga(carga),
+        })),
+      });
       return created;
     });
 

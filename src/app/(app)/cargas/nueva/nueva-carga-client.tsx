@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChangeEvent, ClipboardEvent, KeyboardEvent, useRef, useState } from "react";
+import { ChangeEvent, ClipboardEvent, KeyboardEvent, useMemo, useRef, useState } from "react";
 import { MovementType } from "@prisma/client";
 import { AlertTriangle, Check, ClipboardCheck, Copy, Info, Plus, Save, Trash2, Upload } from "lucide-react";
 import { movementLabels } from "@/lib/format";
@@ -88,8 +88,10 @@ export function NuevaCargaClient() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [rowIssues, setRowIssues] = useState<RowIssue[]>([]);
+  const [pasteBuffer, setPasteBuffer] = useState("");
   const [saving, setSaving] = useState(false);
   const refs = useRef<Record<string, HTMLInputElement | null>>({});
+  const quantityFormatter = useMemo(() => new Intl.NumberFormat("es-ES"), []);
 
   function updateRow(index: number, key: keyof Row, value: string) {
     setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [key]: value } : row));
@@ -97,6 +99,10 @@ export function NuevaCargaClient() {
 
   function addRow() {
     setRows((current) => [...current, emptyRow()]);
+  }
+
+  function addRows(count: number) {
+    setRows((current) => [...current, ...Array.from({ length: count }, emptyRow)]);
   }
 
   function duplicateRow(index: number) {
@@ -116,6 +122,17 @@ export function NuevaCargaClient() {
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>, rowIndex: number, colIndex: number) {
+    if (event.ctrlKey && event.key === "Enter") {
+      event.preventDefault();
+      save();
+      return;
+    }
+    if (event.ctrlKey && event.key.toLowerCase() === "d") {
+      event.preventDefault();
+      duplicateRow(rowIndex);
+      window.setTimeout(() => focusCell(rowIndex + 1, colIndex), 0);
+      return;
+    }
     if (event.key === "Enter") {
       event.preventDefault();
       if (rowIndex === rows.length - 1) setRows((current) => [...current, emptyRow()]);
@@ -166,6 +183,17 @@ export function NuevaCargaClient() {
     }
   }
 
+  function applyPasteBuffer() {
+    setError("");
+    setRowIssues([]);
+    if (!pasteBuffer.trim()) {
+      setError("Pega primero varias líneas en el cuadro de carga rápida.");
+      return;
+    }
+    pasteTextIntoGrid(pasteBuffer, 0, 0);
+    setMessage("Líneas interpretadas. Puedes guardar con Ctrl+Enter si todo está correcto.");
+  }
+
   async function save() {
     setSaving(true);
     setError("");
@@ -208,6 +236,15 @@ export function NuevaCargaClient() {
   const warningRows = filledRows.filter((row) => !row.ubicacionOrigen.trim() || !(row.ubicacionDestino.trim() || common.ubicacionDestino.trim()));
   const errorRows = filledRows.length - validRows.length;
   const totalQuantity = filledRows.reduce((sum, row) => sum + (Number(row.cantidadPrevista) || 0), 0);
+  const rowIssueMap = useMemo(() => {
+    const map = new Map<number, RowIssue[]>();
+    rowIssues.forEach((issue) => {
+      const list = map.get(issue.row) ?? [];
+      list.push(issue);
+      map.set(issue.row, list);
+    });
+    return map;
+  }, [rowIssues]);
 
   return (
     <div className="space-y-4">
@@ -216,7 +253,7 @@ export function NuevaCargaClient() {
           <h1 className="text-2xl font-black text-[#0b1b33]">Nueva carga</h1>
           <p className="mt-1 text-sm font-semibold text-[#6b8299]">Entrada rápida de datos tipo Excel para cargas por realizar</p>
         </div>
-        <button className="btn btn-primary" disabled={saving} onClick={save} type="button">
+        <button className="btn btn-primary" disabled={saving || errorRows > 0 || filledRows.length === 0} onClick={save} type="button" title="Ctrl+Enter">
           <Save className="h-4 w-4" />
           {saving ? "Guardando..." : "Guardar cargas"}
         </button>
@@ -268,11 +305,39 @@ export function NuevaCargaClient() {
         </div>
       </section>
 
+      <section className="app-card p-4">
+        <div className="grid gap-3 xl:grid-cols-[1fr_auto]">
+          <div>
+            <h2 className="font-black text-[#0b1b33]">Carga rápida desde Excel</h2>
+            <p className="mt-1 text-sm font-semibold text-[#6b8299]">
+              Pega filas completas en el orden: artículo, descripción, lote, cantidad, origen, destino, OF y comentario.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-secondary" onClick={importFromClipboard} type="button"><Upload className="h-4 w-4" /> Leer portapapeles</button>
+            <button className="btn btn-primary" onClick={applyPasteBuffer} type="button"><Check className="h-4 w-4" /> Pasar a la tabla</button>
+          </div>
+        </div>
+        <textarea
+          className="field mt-3 min-h-24 resize-y font-mono text-xs"
+          onChange={(event) => setPasteBuffer(event.target.value)}
+          onPaste={(event) => {
+            const text = event.clipboardData.getData("text");
+            if (text.includes("\t") || text.includes("\n")) {
+              window.setTimeout(() => pasteTextIntoGrid(text, 0, 0), 0);
+            }
+          }}
+          placeholder={"1375900118\tENVUELTAS F2 155MM\t2601182\t436\tWC071\tWC091\t160361\n1376800038\tPOLV.B7M67 PARA M67FC\tFAG26D001-008\t900\tC383\tF217\t160371"}
+          value={pasteBuffer}
+        />
+      </section>
+
       <section className="app-card">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#d7e2ee] px-4 py-3">
           <h2 className="font-black text-[#0b1b33]">Líneas de carga</h2>
           <div className="flex gap-2">
             <button className="btn btn-primary" onClick={addRow} type="button"><Plus className="h-4 w-4" /> Añadir fila</button>
+            <button className="btn btn-secondary" onClick={() => addRows(20)} type="button">+20 filas</button>
             <button className="btn btn-secondary" onClick={importFromClipboard} type="button"><Upload className="h-4 w-4" /> Pegar desde Excel</button>
             <button className="btn btn-secondary" onClick={() => setRows([emptyRow(), emptyRow(), emptyRow(), emptyRow(), emptyRow()])} type="button">Limpiar</button>
           </div>
@@ -298,13 +363,22 @@ export function NuevaCargaClient() {
                         className="field h-9 px-2 py-1"
                         value={row[column.key]}
                         onChange={(event: ChangeEvent<HTMLInputElement>) => updateRow(rowIndex, column.key, event.target.value)}
+                        onBlur={() => {
+                          if (column.key === "cantidadPrevista") updateRow(rowIndex, column.key, normalizeQuantity(row[column.key]));
+                          if (column.key === "ubicacionOrigen" || column.key === "ubicacionDestino") updateRow(rowIndex, column.key, row[column.key].trim().toUpperCase());
+                        }}
                         onKeyDown={(event) => onKeyDown(event, rowIndex, colIndex)}
                         onPaste={(event) => onPaste(event, rowIndex, colIndex)}
                       />
+                      {rowIssueMap.get(rowIndex + 1)?.some((issue) => issue.field === column.key) ? (
+                        <p className="mt-1 text-[11px] font-bold text-red-700">{rowIssueMap.get(rowIndex + 1)?.find((issue) => issue.field === column.key)?.message}</p>
+                      ) : null}
                     </td>
                   ))}
                   <td className="px-2 py-1">
-                    {row.codigoArticulo || row.descripcionArticulo || row.cantidadPrevista ? (
+                    {rowIssueMap.has(rowIndex + 1) ? (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-red-100 px-2 py-1 text-xs font-bold text-red-800"><AlertTriangle className="h-3 w-3" /> Revisar</span>
+                    ) : row.codigoArticulo || row.descripcionArticulo || row.cantidadPrevista ? (
                       row.codigoArticulo && row.descripcionArticulo && Number(normalizeQuantity(row.cantidadPrevista)) > 0
                         ? <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800"><Check className="h-3 w-3" /> OK</span>
                         : <span className="inline-flex items-center gap-1 rounded-md bg-red-100 px-2 py-1 text-xs font-bold text-red-800"><AlertTriangle className="h-3 w-3" /> Revisar</span>
@@ -373,7 +447,7 @@ export function NuevaCargaClient() {
             <Preview label="Líneas correctas" value={String(validRows.length)} />
             <Preview label="Líneas con advertencias" value={String(warningRows.length)} />
             <Preview label="Líneas con errores" value={String(errorRows)} />
-            <Preview label="Cantidad total" value={new Intl.NumberFormat("es-ES").format(totalQuantity)} />
+            <Preview label="Cantidad total" value={quantityFormatter.format(totalQuantity)} />
           </dl>
           {errorRows > 0 ? <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Revisa las incidencias antes de guardar.</div> : null}
         </div>
