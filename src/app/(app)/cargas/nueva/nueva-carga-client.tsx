@@ -39,6 +39,41 @@ const columns: { key: keyof Row; label: string; width: string }[] = [
   { key: "comentario", label: "Comentario", width: "w-72" },
 ];
 
+type RowIssue = {
+  row: number;
+  field: string;
+  message: string;
+};
+
+function normalizeQuantity(value: string) {
+  const cleaned = value.trim().replace(/\s/g, "").replace(/[a-zA-Z]+/g, "");
+  if (!cleaned) return "";
+  const hasComma = cleaned.includes(",");
+  const hasDot = cleaned.includes(".");
+  if (hasComma && hasDot) {
+    const lastComma = cleaned.lastIndexOf(",");
+    const lastDot = cleaned.lastIndexOf(".");
+    const decimalSeparator = lastComma > lastDot ? "," : ".";
+    const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+    return cleaned.replaceAll(thousandsSeparator, "").replace(decimalSeparator, ".");
+  }
+  if (hasComma) return cleaned.replace(",", ".");
+  return cleaned;
+}
+
+function normalizeRow(row: Row): Row {
+  return {
+    codigoArticulo: row.codigoArticulo.trim(),
+    descripcionArticulo: row.descripcionArticulo.trim(),
+    lote: row.lote.trim(),
+    cantidadPrevista: normalizeQuantity(row.cantidadPrevista),
+    ubicacionOrigen: row.ubicacionOrigen.trim().toUpperCase(),
+    ubicacionDestino: row.ubicacionDestino.trim().toUpperCase(),
+    ordenFabricacion: row.ordenFabricacion.trim(),
+    comentario: row.comentario.trim(),
+  };
+}
+
 export function NuevaCargaClient() {
   const router = useRouter();
   const [common, setCommon] = useState({
@@ -52,6 +87,7 @@ export function NuevaCargaClient() {
   const [rows, setRows] = useState<Row[]>([emptyRow(), emptyRow(), emptyRow(), emptyRow(), emptyRow()]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [rowIssues, setRowIssues] = useState<RowIssue[]>([]);
   const [saving, setSaving] = useState(false);
   const refs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -91,11 +127,16 @@ export function NuevaCargaClient() {
     const text = event.clipboardData.getData("text");
     if (!text.includes("\t") && !text.includes("\n")) return;
     event.preventDefault();
-    const parsed = text
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => line.split("\t"));
+    pasteTextIntoGrid(text, startRow, startCol);
+  }
 
+  function pasteTextIntoGrid(text: string, startRow = 0, startCol = 0) {
+    const parsed = text
+      .replace(/\r/g, "")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => line.split("\t"));
+    if (!parsed.length) return;
     setRows((current) => {
       const next = [...current];
       while (next.length < startRow + parsed.length) next.push(emptyRow());
@@ -109,17 +150,41 @@ export function NuevaCargaClient() {
     });
   }
 
+  async function importFromClipboard() {
+    setError("");
+    setRowIssues([]);
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) {
+        setError("El portapapeles está vacío.");
+        return;
+      }
+      pasteTextIntoGrid(text, 0, 0);
+      setMessage("Datos pegados desde Excel. Revisa las líneas antes de guardar.");
+    } catch {
+      setError("No se pudo leer el portapapeles. También puedes pegar directamente sobre la primera celda con Ctrl+V.");
+    }
+  }
+
   async function save() {
     setSaving(true);
     setError("");
     setMessage("");
-    const validRows = rows.filter((row) => row.codigoArticulo.trim() || row.descripcionArticulo.trim() || row.cantidadPrevista.trim());
+    setRowIssues([]);
+    const filledRows = rows
+      .map(normalizeRow)
+      .filter((row) => Object.values(row).some((value) => value.trim() !== ""));
+    if (!filledRows.length) {
+      setSaving(false);
+      setError("Añade al menos una línea para guardar.");
+      return;
+    }
     const res = await fetch("/api/cargas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         common,
-        rows: validRows.map((row) => ({
+        rows: filledRows.map((row) => ({
           ...row,
           ubicacionDestino: row.ubicacionDestino || common.ubicacionDestino,
           ordenFabricacion: row.ordenFabricacion || common.ordenFabricacion,
@@ -130,6 +195,7 @@ export function NuevaCargaClient() {
     setSaving(false);
     if (!res.ok) {
       setError(body.error || "No se pudieron guardar las cargas.");
+      setRowIssues(body.rowIssues || []);
       return;
     }
     setMessage(body.message || "Cargas registradas correctamente.");
@@ -137,7 +203,7 @@ export function NuevaCargaClient() {
     router.refresh();
   }
 
-  const filledRows = rows.filter((row) => row.codigoArticulo.trim() || row.descripcionArticulo.trim() || row.cantidadPrevista.trim());
+  const filledRows = rows.map(normalizeRow).filter((row) => row.codigoArticulo.trim() || row.descripcionArticulo.trim() || row.cantidadPrevista.trim());
   const validRows = filledRows.filter((row) => row.codigoArticulo.trim() && row.descripcionArticulo.trim() && Number(row.cantidadPrevista) > 0);
   const warningRows = filledRows.filter((row) => !row.ubicacionOrigen.trim() || !(row.ubicacionDestino.trim() || common.ubicacionDestino.trim()));
   const errorRows = filledRows.length - validRows.length;
@@ -207,7 +273,7 @@ export function NuevaCargaClient() {
           <h2 className="font-black text-[#0b1b33]">Líneas de carga</h2>
           <div className="flex gap-2">
             <button className="btn btn-primary" onClick={addRow} type="button"><Plus className="h-4 w-4" /> Añadir fila</button>
-            <button className="btn btn-secondary" type="button"><Upload className="h-4 w-4" /> Importar desde Excel</button>
+            <button className="btn btn-secondary" onClick={importFromClipboard} type="button"><Upload className="h-4 w-4" /> Pegar desde Excel</button>
             <button className="btn btn-secondary" onClick={() => setRows([emptyRow(), emptyRow(), emptyRow(), emptyRow(), emptyRow()])} type="button">Limpiar</button>
           </div>
         </div>
@@ -239,7 +305,7 @@ export function NuevaCargaClient() {
                   ))}
                   <td className="px-2 py-1">
                     {row.codigoArticulo || row.descripcionArticulo || row.cantidadPrevista ? (
-                      row.codigoArticulo && row.descripcionArticulo && Number(row.cantidadPrevista) > 0
+                      row.codigoArticulo && row.descripcionArticulo && Number(normalizeQuantity(row.cantidadPrevista)) > 0
                         ? <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800"><Check className="h-3 w-3" /> OK</span>
                         : <span className="inline-flex items-center gap-1 rounded-md bg-red-100 px-2 py-1 text-xs font-bold text-red-800"><AlertTriangle className="h-3 w-3" /> Revisar</span>
                     ) : <span className="text-xs text-slate-400">-</span>}
@@ -254,6 +320,20 @@ export function NuevaCargaClient() {
           </table>
         </div>
       </section>
+
+      {rowIssues.length ? (
+        <section className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <h2 className="font-black">Errores por línea</h2>
+          <ul className="mt-2 space-y-1">
+            {rowIssues.slice(0, 12).map((issue, index) => (
+              <li key={`${issue.row}-${issue.field}-${index}`} className="font-semibold">
+                Línea {issue.row}: {issue.message}
+              </li>
+            ))}
+          </ul>
+          {rowIssues.length > 12 ? <p className="mt-2 font-bold">Hay más errores. Corrige los primeros y vuelve a guardar.</p> : null}
+        </section>
+      ) : null}
 
       <section className="grid gap-3 xl:grid-cols-3">
         <div className="app-card bg-emerald-50 p-4">

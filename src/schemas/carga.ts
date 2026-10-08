@@ -1,7 +1,32 @@
 import { LoadStatus, MovementType } from "@prisma/client";
 import { z } from "zod";
 
-const numberFromInput = z.coerce.number({ error: "Introduce un número válido." });
+export function normalizeNumberInput(value: unknown) {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return value;
+
+  const cleaned = value
+    .trim()
+    .replace(/\s/g, "")
+    .replace(/[a-zA-Z]+/g, "");
+
+  if (!cleaned) return Number.NaN;
+
+  const hasComma = cleaned.includes(",");
+  const hasDot = cleaned.includes(".");
+  if (hasComma && hasDot) {
+    const lastComma = cleaned.lastIndexOf(",");
+    const lastDot = cleaned.lastIndexOf(".");
+    const decimalSeparator = lastComma > lastDot ? "," : ".";
+    const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+    return Number(cleaned.replaceAll(thousandsSeparator, "").replace(decimalSeparator, "."));
+  }
+
+  if (hasComma) return Number(cleaned.replace(",", "."));
+  return Number(cleaned);
+}
+
+const requiredNumber = (schema: z.ZodNumber) => z.preprocess(normalizeNumberInput, schema);
 const optionalText = z.string().trim().optional().nullable().transform((value) => value || null);
 
 export const cargaSchema = z.object({
@@ -12,8 +37,8 @@ export const cargaSchema = z.object({
   codigoArticulo: z.string().trim().min(1, "El código de artículo es obligatorio."),
   descripcionArticulo: z.string().trim().min(1, "La descripción es obligatoria."),
   lote: optionalText,
-  cantidadPrevista: numberFromInput.gt(0, "La cantidad prevista debe ser mayor que 0."),
-  cantidadRealizada: numberFromInput.min(0, "La cantidad realizada no puede ser negativa.").default(0),
+  cantidadPrevista: requiredNumber(z.number({ error: "Introduce un número válido." }).gt(0, "La cantidad prevista debe ser mayor que 0.")),
+  cantidadRealizada: requiredNumber(z.number({ error: "Introduce un número válido." }).min(0, "La cantidad realizada no puede ser negativa.")).default(0),
   ubicacionOrigen: optionalText,
   ubicacionDestino: optionalText,
   ordenFabricacion: optionalText,
@@ -37,7 +62,7 @@ export const bulkCargaSchema = z.object({
     codigoArticulo: z.string().trim().min(1, "Código obligatorio."),
     descripcionArticulo: z.string().trim().min(1, "Descripción obligatoria."),
     lote: optionalText,
-    cantidadPrevista: numberFromInput.gt(0, "Cantidad mayor que 0."),
+    cantidadPrevista: requiredNumber(z.number({ error: "Introduce un número válido." }).gt(0, "Cantidad mayor que 0.")),
     ubicacionOrigen: optionalText,
     ubicacionDestino: optionalText,
     ordenFabricacion: optionalText,

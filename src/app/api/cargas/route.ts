@@ -1,5 +1,6 @@
 import { LoadStatus, MovementType, Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
+import type { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireSession, requireWrite } from "@/lib/permissions";
 import { auditSafeCarga, serializeCarga } from "@/lib/carga-serialize";
@@ -9,6 +10,46 @@ const includeUsers = {
   createdBy: { select: { id: true, name: true, username: true } },
   updatedBy: { select: { id: true, name: true, username: true } },
 } satisfies Prisma.CargaInclude;
+
+type BulkRequestBody = {
+  common?: unknown;
+  rows?: Array<Record<string, unknown>>;
+};
+
+function compactBulkPayload(body: unknown): BulkRequestBody {
+  if (!body || typeof body !== "object" || !("rows" in body) || !Array.isArray((body as { rows: unknown }).rows)) {
+    return body as BulkRequestBody;
+  }
+
+  const payload = body as { common?: unknown; rows: Array<Record<string, unknown>> };
+  return {
+    ...payload,
+    rows: payload.rows
+      .map((row, index) => ({ ...row, __lineNumber: index + 1 }))
+      .filter((row) =>
+        [
+          "codigoArticulo",
+          "descripcionArticulo",
+          "lote",
+          "cantidadPrevista",
+          "ubicacionOrigen",
+          "ubicacionDestino",
+          "ordenFabricacion",
+          "comentario",
+        ].some((key) => String((row as Record<string, unknown>)[key] ?? "").trim() !== ""),
+      ),
+  };
+}
+
+function rowIssuesFromError(error: ZodError) {
+  return error.issues
+    .filter((issue) => issue.path[0] === "rows" && typeof issue.path[1] === "number")
+    .map((issue) => ({
+      row: Number(issue.path[1]) + 1,
+      field: String(issue.path[2] ?? "línea"),
+      message: issue.message,
+    }));
+}
 
 function buildWhere(searchParams: URLSearchParams): Prisma.CargaWhereInput {
   const q = searchParams.get("q")?.trim();
@@ -81,12 +122,19 @@ export async function POST(request: NextRequest) {
   const auth = await requireWrite();
   if ("error" in auth) return auth.error;
 
-  const body = await request.json();
+  const body = compactBulkPayload(await request.json());
   const isBulk = Array.isArray(body.rows);
   if (isBulk) {
     const parsed = bulkCargaSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Revisa los datos introducidos.", issues: parsed.error.flatten() }, { status: 400 });
+      const rowIssues = rowIssuesFromError(parsed.error);
+      return NextResponse.json({
+        error: rowIssues.length
+          ? `Hay ${rowIssues.length} error(es) en las líneas. No se ha guardado ninguna carga.`
+          : "Revisa los datos introducidos.",
+        issues: parsed.error.flatten(),
+        rowIssues,
+      }, { status: 400 });
     }
 
     const result = await prisma.$transaction(async (tx) => {
